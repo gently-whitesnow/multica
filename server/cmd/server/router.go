@@ -885,9 +885,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/session", h.PinTaskSession)
 	})
 
+	// Service-principal API. Machine identities are intentionally isolated
+	// from the member/agent route tree below: every future business endpoint
+	// must opt in here with RequireServicePrincipalScope.
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
+		r.With(middleware.RequireServicePrincipal).Get("/api/service-principal/identity", h.GetServicePrincipalIdentity)
+	})
+
 	// Protected API routes
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
+		r.Use(handler.RejectServicePrincipalActor)
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
 		// --- User-scoped routes (no workspace context required) ---
@@ -966,6 +975,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Delete("/", h.DeleteMember)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					r.Route("/service-principals", func(r chi.Router) {
+						r.Use(handler.RequireHumanActor)
+						r.Get("/", h.ListServicePrincipals)
+						r.Post("/", h.CreateServicePrincipal)
+						r.Post("/{principalId}/rotate", h.RotateServicePrincipalCredential)
+						r.Delete("/{principalId}", h.RevokeServicePrincipal)
+					})
 					// Custom runtime profile mutations (admin-only).
 					r.Post("/runtime-profiles", h.CreateRuntimeProfile)
 					r.Patch("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)

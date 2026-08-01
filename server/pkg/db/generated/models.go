@@ -899,6 +899,35 @@ type RuntimeProfile struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ServicePrincipal struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	OwnerUserID       pgtype.UUID        `json:"owner_user_id"`
+	CreatedByUserID   pgtype.UUID        `json:"created_by_user_id"`
+	Name              string             `json:"name"`
+	Scopes            []string           `json:"scopes"`
+	TokenHash         string             `json:"token_hash"`
+	TokenPrefix       string             `json:"token_prefix"`
+	CredentialVersion int32              `json:"credential_version"`
+	Status            string             `json:"status"`
+	LastUsedAt        pgtype.Timestamptz `json:"last_used_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	RevokedAt         pgtype.Timestamptz `json:"revoked_at"`
+}
+
+type ServicePrincipalAudit struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ServicePrincipalID pgtype.UUID        `json:"service_principal_id"`
+	ActorType          string             `json:"actor_type"`
+	ActorID            pgtype.UUID        `json:"actor_id"`
+	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
+	Action             string             `json:"action"`
+	Details            []byte             `json:"details"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
 type Skill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

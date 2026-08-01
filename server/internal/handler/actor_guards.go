@@ -5,31 +5,34 @@ import (
 )
 
 // RequireHumanActor is a chi-style middleware that rejects requests
-// authenticated via a machine credential — currently mat_ task tokens
-// and mcn_ cloud-node PATs. It exists for endpoints whose
+// authenticated via a machine credential — currently mat_ task tokens,
+// mcn_ cloud-node PATs, and msp_ service-principal credentials. It exists for endpoints whose
 // authorization model is "the human owner authorized this", not
 // "anyone holding the owner's credentials authorized this".
 //
 // Why this guard is needed (read carefully — auth here is subtle):
 //
 // The general Auth middleware (server/internal/middleware/auth.go)
-// turns four different bearer formats into the same shape — a stamped
+// turns different bearer formats into a common accountable-user shape — a stamped
 // `X-User-ID` header — so downstream handlers don't have to care which
 // token kind the caller used:
 //
 //   - JWT cookie / mul_ PAT  → X-User-ID = the human's user id.
-//                              X-Actor-Source is left empty.
+//     X-Actor-Source is left empty.
 //   - mat_ task token        → X-User-ID = the OWNING human's user id,
-//                              plus X-Agent-ID, X-Task-ID, and the
-//                              authoritative server-set header
-//                              `X-Actor-Source: task_token`.
+//     plus X-Agent-ID, X-Task-ID, and the
+//     authoritative server-set header
+//     `X-Actor-Source: task_token`.
 //   - mcn_ cloud-node PAT    → X-User-ID = the OWNING human's user id,
-//                              plus `X-Actor-Source: cloud_pat`.
-//                              The token authenticates a cloud-runtime
-//                              EC2 node operating on the owner's
-//                              behalf — same conceptual category as
-//                              mat_ (machine running owner-scoped
-//                              code) for authorization purposes.
+//     plus `X-Actor-Source: cloud_pat`.
+//     The token authenticates a cloud-runtime
+//     EC2 node operating on the owner's
+//     behalf — same conceptual category as
+//     mat_ (machine running owner-scoped
+//     code) for authorization purposes.
+//   - msp_ service principal → no X-User-ID; the credential owner is carried
+//     separately for audit, alongside `X-Actor-Source: service_principal`, a
+//     distinct machine actor id, and explicit scopes.
 //
 // The mat_ and mcn_ designs (MUL-2600 and the cloud-node PAT story
 // respectively) were both deliberately built this way: every request
@@ -99,8 +102,21 @@ func RequireHumanActor(next http.Handler) http.Handler {
 		// strips any client-supplied value before stamping its own,
 		// so a non-empty value here is authoritative.
 		switch r.Header.Get("X-Actor-Source") {
-		case "task_token", "cloud_pat":
+		case "task_token", "cloud_pat", "service_principal":
 			writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RejectServicePrincipalActor keeps the existing member/agent API closed to
+// external integrations. A service principal may enter only route groups that
+// explicitly opt in with RequireServicePrincipalScope.
+func RejectServicePrincipalActor(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Actor-Source") == "service_principal" {
+			writeError(w, http.StatusForbidden, "service principal is not allowed on this endpoint")
 			return
 		}
 		next.ServeHTTP(w, r)

@@ -146,6 +146,13 @@ func RequestLogger(next http.Handler) http.Handler {
 		if uid := r.Header.Get("X-User-ID"); uid != "" {
 			attrs = append(attrs, "user_id", uid)
 		}
+		if principalID := r.Header.Get("X-Service-Principal-ID"); principalID != "" {
+			attrs = append(attrs,
+				"actor_type", "service_principal",
+				"actor_id", principalID,
+				"credential_owner_id", r.Header.Get("X-Credential-Owner-ID"),
+			)
+		}
 		if tid := webhookTriggerIDFromContext(r.Context()); tid != "" {
 			attrs = append(attrs, "webhook_trigger_id", tid)
 		}

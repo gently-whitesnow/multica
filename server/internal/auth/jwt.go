@@ -37,6 +37,16 @@ func GeneratePATToken() (string, error) {
 	return "mul_" + hex.EncodeToString(b), nil
 }
 
+// GenerateServicePrincipalToken creates a machine credential whose prefix is
+// routed separately from human PATs and task/runtime credentials.
+func GenerateServicePrincipalToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate service principal token: %w", err)
+	}
+	return "msp_" + hex.EncodeToString(b), nil
+}
+
 // GenerateDaemonToken creates a new daemon auth token: "mdt_" + 40 random hex chars.
 func GenerateDaemonToken() (string, error) {
 	b := make([]byte, 20) // 20 bytes = 40 hex chars

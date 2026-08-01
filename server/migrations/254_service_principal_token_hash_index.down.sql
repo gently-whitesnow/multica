@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS service_principal_token_hash_uidx;
