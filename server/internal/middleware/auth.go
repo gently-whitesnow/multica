@@ -45,12 +45,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// plus a forged `X-Actor-Source: member` (or anything else)
 			// to convince a downstream handler that its request came
 			// from a non-task-token path.
-			r.Header.Del("X-Actor-Source")
-			r.Header.Del("X-User-ID")
-			r.Header.Del("X-User-Email")
-			r.Header.Del("X-Service-Principal-ID")
-			r.Header.Del("X-Service-Principal-Scopes")
-			r.Header.Del("X-Credential-Owner-ID")
+			stripClientActorHeaders(r)
 
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
@@ -181,7 +176,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				r.Header.Del("X-Agent-ID")
 				r.Header.Del("X-Task-ID")
 				r.Header.Set("X-Workspace-ID", uuidToString(principal.WorkspaceID))
-				r.Header.Set("X-Actor-Source", "service_principal")
+				r.Header.Set("X-Actor-Source", servicePrincipalSource)
 				r.Header.Set("X-Service-Principal-ID", uuidToString(principal.ID))
 				r.Header.Set("X-Service-Principal-Scopes", strings.Join(principal.Scopes, ","))
 				r.Header.Set("X-Credential-Owner-ID", uuidToString(principal.OwnerUserID))

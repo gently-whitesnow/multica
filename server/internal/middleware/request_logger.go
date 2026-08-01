@@ -146,10 +146,14 @@ func RequestLogger(next http.Handler) http.Handler {
 		if uid := r.Header.Get("X-User-ID"); uid != "" {
 			attrs = append(attrs, "user_id", uid)
 		}
-		if principalID := r.Header.Get("X-Service-Principal-ID"); principalID != "" {
+		// Machine attribution keys off the server-set X-Actor-Source, not
+		// off the mere presence of X-Service-Principal-ID: only the msp_
+		// branch of the Auth middleware stamps that source value, so this
+		// line can never name a principal that did not authenticate.
+		if r.Header.Get("X-Actor-Source") == servicePrincipalSource {
 			attrs = append(attrs,
 				"actor_type", "service_principal",
-				"actor_id", principalID,
+				"actor_id", r.Header.Get("X-Service-Principal-ID"),
 				"credential_owner_id", r.Header.Get("X-Credential-Owner-ID"),
 			)
 		}

@@ -701,6 +701,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Global middleware
 	r.Use(chimw.RequestID)
+	// Runs ahead of routing so public endpoints — which sit behind no auth
+	// middleware at all — also start with an empty actor identity and cannot
+	// forge machine attribution into the access log.
+	r.Use(middleware.StripClientActorHeaders)
 	r.Use(middleware.ClientMetadata)
 	r.Use(middleware.RequestLogger)
 	if opts.HTTPMetrics != nil {
