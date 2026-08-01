@@ -11,6 +11,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
 func TestCreateWorkspace_RejectsReservedSlug(t *testing.T) {
@@ -1083,6 +1086,52 @@ func TestDeleteMember_RevokesTargetRuntimes(t *testing.T) {
 	}
 
 	assertRevoked(t, fx)
+}
+
+// A service-principal credential remains an externally usable workspace key
+// even though its accountable owner is the member being removed. Member
+// revocation must therefore invalidate the principal in the same transaction
+// as the member row, just like it invalidates that member's daemon tokens.
+func TestDeleteMember_RevokesOwnedServicePrincipals(t *testing.T) {
+	fx := setupRevocationFixture(t, "handler-tests-revoke-principal", "daemon-revoke-principal")
+	ctx := context.Background()
+	rawCredential := "msp_removed_owner_repro"
+
+	var principalID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO service_principal (
+    workspace_id, owner_user_id, created_by_user_id, name, scopes, token_hash, token_prefix
+)
+VALUES ($1, $2, $2, 'departing member integration', ARRAY['projections:read'], $3, 'msp_departin')
+RETURNING id
+`, fx.WorkspaceID, fx.TargetUserID, auth.HashToken(rawCredential)).Scan(&principalID); err != nil {
+		t.Fatalf("insert service principal: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM service_principal WHERE id = $1`, principalID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
+	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
+	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
+	testHandler.DeleteMember(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	authReachedHandler := false
+	authHandler := middleware.Auth(testHandler.Queries, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		authReachedHandler = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	authReq := httptest.NewRequest(http.MethodGet, "/api/service-principal/identity", nil)
+	authReq.Header.Set("Authorization", "Bearer "+rawCredential)
+	authW := httptest.NewRecorder()
+	authHandler.ServeHTTP(authW, authReq)
+	if authW.Code != http.StatusUnauthorized || authReachedHandler {
+		t.Fatalf("removed member's service principal still authenticates: status=%d reached_handler=%v", authW.Code, authReachedHandler)
+	}
 }
 
 // TestDeleteMember_PrunesChannelUserBindings verifies the application-layer
