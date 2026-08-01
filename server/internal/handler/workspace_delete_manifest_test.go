@@ -84,6 +84,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"quick_action":                    workspaceDelete,
 	"runtime_profile":                 workspaceDelete,
 	"schema_migrations":               workspaceDeleteKeep,
+	"service_principal":               workspaceDelete,
+	"service_principal_audit":         workspaceDelete,
 	"skill":                           workspaceDelete,
 	"skill_file":                      workspaceDelete,
 	"skill_to_label":                  workspaceDelete,

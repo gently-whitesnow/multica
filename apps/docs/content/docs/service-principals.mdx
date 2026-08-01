@@ -1,0 +1,46 @@
+---
+title: Service principals API
+description: Workspace-scoped machine identities for external integrations.
+---
+
+Service principals authenticate external integrations without impersonating a
+Multica member or agent. Management endpoints require a human workspace owner
+or admin. Send human authentication normally and use the workspace UUID in the
+path.
+
+## Management endpoints
+
+| Method | Path | Result |
+| --- | --- | --- |
+| `POST` | `/api/workspaces/{workspaceId}/service-principals` | Creates a principal and returns its credential once |
+| `GET` | `/api/workspaces/{workspaceId}/service-principals` | Lists metadata; never returns a credential or hash |
+| `POST` | `/api/workspaces/{workspaceId}/service-principals/{principalId}/rotate` | Replaces the credential and returns the new value once |
+| `DELETE` | `/api/workspaces/{workspaceId}/service-principals/{principalId}` | Revokes the principal immediately |
+
+Create body:
+
+```json
+{
+  "name": "approval-sync",
+  "scopes": ["projections:read", "approvals:read"]
+}
+```
+
+The `credential` field appears only in successful create and rotate responses.
+Store it in the integration's secret manager; it cannot be recovered later.
+
+## Authentication and scopes
+
+Use `Authorization: Bearer msp_...`. A principal can call
+`GET /api/service-principal/identity` to inspect its actor ID, workspace,
+accountable owner, and fixed scopes. This endpoint grants no business access.
+
+Supported scopes are `projections:create`, `projections:read`,
+`projections:update`, `approvals:read`, and `approvals:decide`. Projection and
+approval endpoints are introduced separately; every such endpoint must opt into
+one exact scope. A missing, unknown, or merely prefix-matching scope returns
+`403 Forbidden`.
+
+Service-principal credentials cannot call the member/agent API, manage their own
+scopes, become assignees or human approvers, start agents, access shell or
+repository/deployment secrets, or impersonate their owner.

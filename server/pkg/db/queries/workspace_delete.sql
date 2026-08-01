@@ -110,6 +110,12 @@ ws_channel_installations AS MATERIALIZED (
 ws_lark_installations AS MATERIALIZED (
     SELECT id FROM lark_installation WHERE workspace_id = $1
 ),
+deleted_service_principal_audit AS (
+    DELETE FROM service_principal_audit WHERE workspace_id = $1
+),
+deleted_service_principals AS (
+    DELETE FROM service_principal WHERE workspace_id = $1
+),
 deleted_task_usage AS (
     DELETE FROM task_usage
     WHERE task_id IN (SELECT id FROM ws_tasks)

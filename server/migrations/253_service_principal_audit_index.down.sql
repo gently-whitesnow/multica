@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS service_principal_audit_principal_idx;
