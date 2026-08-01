@@ -221,3 +221,47 @@ func TestCreateExternalIssueDoesNotGrantAgentExecution(t *testing.T) {
 		t.Fatalf("service-principal projection started %d agent task(s)", count)
 	}
 }
+
+func TestCreateExternalIssueRetryReturnsOriginalAfterAssigneeArchived(t *testing.T) {
+	provider, instanceID, externalID := "overtime", "archived-assignee", uuid.NewString()
+	cleanupExternalIssue(t, provider, instanceID, externalID)
+	agentID := createHandlerTestAgent(t, "External projection archived retry "+externalID[:8], nil)
+	request := func() *http.Request {
+		req := newRequest(http.MethodPost, "/api/integration/issues", map[string]any{
+			"external_issue_ref": map[string]any{
+				"provider": provider, "instance_id": instanceID, "external_id": externalID,
+			},
+			"issue": map[string]any{
+				"title": "Assigned projection", "status": "backlog",
+				"assignee_type": "agent", "assignee_id": agentID,
+			},
+		})
+		req.Header.Del("X-User-ID")
+		req.Header.Set("X-Actor-Source", "service_principal")
+		req.Header.Set("X-Service-Principal-ID", uuid.NewString())
+		return req
+	}
+
+	createdW := httptest.NewRecorder()
+	testHandler.CreateExternalIssue(createdW, request())
+	if createdW.Code != http.StatusCreated {
+		t.Fatalf("create status = %d: %s", createdW.Code, createdW.Body.String())
+	}
+	created := decodeExternalIssueResponse(t, createdW)
+
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET archived_at = now() WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("archive assignee: %v", err)
+	}
+
+	// Simulate a lost 201 response. The immutable binding already exists, so
+	// an identical retry must resolve it even if mutable assignee state changed.
+	retryW := httptest.NewRecorder()
+	testHandler.CreateExternalIssue(retryW, request())
+	if retryW.Code != http.StatusOK {
+		t.Fatalf("retry status = %d, want 200: %s", retryW.Code, retryW.Body.String())
+	}
+	retried := decodeExternalIssueResponse(t, retryW)
+	if retried.Created || retried.Issue.ID != created.Issue.ID {
+		t.Fatalf("retry did not return original issue: %+v", retried)
+	}
+}
