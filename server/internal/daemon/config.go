@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -124,6 +125,10 @@ type Config struct {
 	// prefers a matching, executable override over resolving the profile's
 	// command_name on PATH. nil/empty means "always resolve via PATH".
 	ProfileCommandOverrides map[string]string
+	// RequireLinuxTaskIsolation makes every Linux task use an ephemeral OS
+	// identity. A preparation or cleanup failure is terminal; there is no
+	// fallback to executing as the daemon user.
+	RequireLinuxTaskIsolation bool
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -437,6 +442,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if overrides.AutoUpdateCheckInterval > 0 {
 		autoUpdateInterval = overrides.AutoUpdateCheckInterval
 	}
+	requireLinuxTaskIsolation, err := parseLinuxTaskIsolation(os.Getenv("MULTICA_LINUX_TASK_ISOLATION"), runtime.GOOS)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		ServerBaseURL:                  serverBaseURL,
@@ -472,7 +481,22 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodebuddyArgs:                  codebuddyArgs,
 		QwenArgs:                       qwenArgs,
 		ProfileCommandOverrides:        profileCommandOverrides,
+		RequireLinuxTaskIsolation:      requireLinuxTaskIsolation,
 	}, nil
+}
+
+func parseLinuxTaskIsolation(raw, goos string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "disabled":
+		return false, nil
+	case "required":
+		if goos != "linux" {
+			return false, fmt.Errorf("MULTICA_LINUX_TASK_ISOLATION=required is supported only on Linux")
+		}
+		return true, nil
+	default:
+		return false, fmt.Errorf("MULTICA_LINUX_TASK_ISOLATION must be required or disabled")
+	}
 }
 
 // officialCloudHost is the hostname of Multica's hosted cloud. It's the only

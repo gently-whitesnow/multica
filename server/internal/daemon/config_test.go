@@ -35,6 +35,25 @@ func TestDefaultGCIntervalIsTwoHours(t *testing.T) {
 	}
 }
 
+func TestParseLinuxTaskIsolation(t *testing.T) {
+	for _, tc := range []struct {
+		raw, goos string
+		want      bool
+		wantErr   bool
+	}{
+		{"", "linux", false, false},
+		{"disabled", "linux", false, false},
+		{"required", "linux", true, false},
+		{"required", "darwin", false, true},
+		{"best-effort", "linux", false, true},
+	} {
+		got, err := parseLinuxTaskIsolation(tc.raw, tc.goos)
+		if got != tc.want || (err != nil) != tc.wantErr {
+			t.Errorf("parseLinuxTaskIsolation(%q, %q) = %v, %v", tc.raw, tc.goos, got, err)
+		}
+	}
+}
+
 func TestPatternsFromEnv_DropsSeparatorBearingEntries(t *testing.T) {
 	t.Setenv("MULTICA_GC_ARTIFACT_PATTERNS", "node_modules, .next ,foo/bar, ../etc, ,target")
 	got := patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", nil)
