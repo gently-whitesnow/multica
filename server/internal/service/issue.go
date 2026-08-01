@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -77,6 +78,20 @@ type IssueCreateParams struct {
 	// Stage groups this issue into an ordered barrier group under its parent
 	// (NULL = unstaged). See issue_child_done.go for the staged-barrier wake.
 	Stage pgtype.Int4
+	// ExternalRef, when present, makes creation idempotent by an immutable
+	// workspace/provider/instance/external key. The binding is inserted in the
+	// same transaction as the issue row; a retry with the same payload digest
+	// returns the original issue, while a different digest fails closed.
+	ExternalRef *ExternalIssueRefCreateParams
+}
+
+type ExternalIssueRefCreateParams struct {
+	Provider                    string
+	InstanceID                  string
+	ExternalID                  string
+	PayloadHash                 []byte
+	ExternalURL                 pgtype.Text
+	CreatedByServicePrincipalID pgtype.UUID
 }
 
 // IssueCreateOpts groups optional knobs for IssueService.Create. Most
@@ -112,6 +127,11 @@ type IssueCreateOpts struct {
 	// daemon / lark / autopilot). Derived from middleware's client
 	// metadata at the handler layer.
 	Platform string
+
+	// SuppressEnqueue records an assignment without starting agent work. This
+	// is required for service-principal projections: their scopes permit issue
+	// projection writes, never direct agent execution.
+	SuppressEnqueue bool
 }
 
 // ErrActiveDuplicate signals that the duplicate guard found an active
@@ -140,6 +160,10 @@ var ErrProjectNotFound = errors.New("project not found in this workspace")
 // label set. Callers translate this into their transport's 400.
 var ErrIssueLabelNotFound = errors.New("issue label not found in this workspace")
 
+// ErrExternalIssuePayloadConflict means an immutable external key is already
+// bound to an issue, but the caller supplied a different normalized payload.
+var ErrExternalIssuePayloadConflict = errors.New("external issue key already exists with a different payload")
+
 // IssueCreateResult is the typed return from IssueService.Create.
 //
 //   - On the happy path: Issue is the new row, Attachments lists the
@@ -156,6 +180,8 @@ type IssueCreateResult struct {
 	// understood label_ids (see the create handler's compatibility contract).
 	Labels         []db.IssueLabel
 	DuplicateIssue *db.Issue
+	ExternalRef    *db.ExternalIssueRef
+	Existing       bool
 }
 
 // Create runs the full issue-creation pipeline atomically end-to-end:
@@ -185,6 +211,34 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+
+	if p.ExternalRef != nil {
+		key := db.LockExternalIssueRefKeyParams{
+			WorkspaceID: p.WorkspaceID,
+			Provider:    p.ExternalRef.Provider,
+			InstanceID:  p.ExternalRef.InstanceID,
+			ExternalID:  p.ExternalRef.ExternalID,
+		}
+		if err := qtx.LockExternalIssueRefKey(ctx, key); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("lock external issue ref: %w", err)
+		}
+		existing, err := qtx.GetExternalIssueRef(ctx, db.GetExternalIssueRefParams(key))
+		if err == nil {
+			if !bytes.Equal(existing.PayloadHash, p.ExternalRef.PayloadHash) {
+				return IssueCreateResult{ExternalRef: &existing, Existing: true}, ErrExternalIssuePayloadConflict
+			}
+			issue, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+				ID: existing.IssueID, WorkspaceID: p.WorkspaceID,
+			})
+			if err != nil {
+				return IssueCreateResult{}, fmt.Errorf("get externally referenced issue: %w", err)
+			}
+			return IssueCreateResult{Issue: issue, ExternalRef: &existing, Existing: true}, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return IssueCreateResult{}, fmt.Errorf("get external issue ref: %w", err)
+		}
+	}
 
 	// Resolve and validate parent / project before reading from the
 	// duplicate guard so a forged parent or project ID is rejected
@@ -315,6 +369,24 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}
 	}
 
+	var externalRef *db.ExternalIssueRef
+	if p.ExternalRef != nil {
+		created, err := qtx.CreateExternalIssueRef(ctx, db.CreateExternalIssueRefParams{
+			WorkspaceID:                 p.WorkspaceID,
+			Provider:                    p.ExternalRef.Provider,
+			InstanceID:                  p.ExternalRef.InstanceID,
+			ExternalID:                  p.ExternalRef.ExternalID,
+			IssueID:                     issue.ID,
+			PayloadHash:                 p.ExternalRef.PayloadHash,
+			ExternalUrl:                 p.ExternalRef.ExternalURL,
+			CreatedByServicePrincipalID: p.ExternalRef.CreatedByServicePrincipalID,
+		})
+		if err != nil {
+			return IssueCreateResult{}, fmt.Errorf("create external issue ref: %w", err)
+		}
+		externalRef = &created
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return IssueCreateResult{}, fmt.Errorf("commit: %w", err)
 	}
@@ -328,9 +400,11 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 
 	s.publishIssueCreated(issue, attachments, labels, p.CreatorType, actorID, opts)
 	s.captureCreatedAnalytics(issue, p.CreatorType, actorID, opts)
-	s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID)
+	if !opts.SuppressEnqueue {
+		s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID)
+	}
 
-	return IssueCreateResult{Issue: issue, Attachments: attachments, Labels: labels}, nil
+	return IssueCreateResult{Issue: issue, Attachments: attachments, Labels: labels, ExternalRef: externalRef}, nil
 }
 
 // validateIssueLabels checks that every requested label exists in the

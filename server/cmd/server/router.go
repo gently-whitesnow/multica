@@ -895,6 +895,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
 		r.With(middleware.RequireServicePrincipal).Get("/api/service-principal/identity", h.GetServicePrincipalIdentity)
+		r.With(middleware.RequireServicePrincipalScope("projections:create")).Post("/api/integration/issues", h.CreateExternalIssue)
+		r.With(middleware.RequireServicePrincipalScope("projections:read")).Get("/api/integration/issues", h.GetExternalIssue)
 	})
 
 	// Protected API routes

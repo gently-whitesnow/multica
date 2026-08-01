@@ -499,6 +499,19 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ExternalIssueRef struct {
+	ID                          pgtype.UUID        `json:"id"`
+	WorkspaceID                 pgtype.UUID        `json:"workspace_id"`
+	Provider                    string             `json:"provider"`
+	InstanceID                  string             `json:"instance_id"`
+	ExternalID                  string             `json:"external_id"`
+	IssueID                     pgtype.UUID        `json:"issue_id"`
+	PayloadHash                 []byte             `json:"payload_hash"`
+	ExternalUrl                 pgtype.Text        `json:"external_url"`
+	CreatedByServicePrincipalID pgtype.UUID        `json:"created_by_service_principal_id"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+}
+
 type Feedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`

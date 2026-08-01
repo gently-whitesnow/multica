@@ -113,6 +113,9 @@ ws_lark_installations AS MATERIALIZED (
 deleted_service_principal_audit AS (
     DELETE FROM service_principal_audit WHERE workspace_id = $1
 ),
+deleted_external_issue_refs AS (
+    DELETE FROM external_issue_ref WHERE workspace_id = $1
+),
 deleted_service_principals AS (
     DELETE FROM service_principal WHERE workspace_id = $1
 ),

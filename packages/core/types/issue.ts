@@ -13,6 +13,7 @@ export type IssueStatus =
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
 export type IssueAssigneeType = "member" | "agent" | "squad";
+export type IssueCreatorType = "member" | "agent" | "service_principal";
 
 export interface IssueReaction {
   id: string;
@@ -44,7 +45,7 @@ export interface Issue {
   priority: IssuePriority;
   assignee_type: IssueAssigneeType | null;
   assignee_id: string | null;
-  creator_type: IssueAssigneeType;
+  creator_type: IssueCreatorType;
   creator_id: string;
   parent_issue_id: string | null;
   project_id: string | null;

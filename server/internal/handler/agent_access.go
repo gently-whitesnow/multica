@@ -79,7 +79,7 @@ func (h *Handler) canInvokeAgent(ctx context.Context, agent db.Agent, actorType,
 	// so an unattributed agent/system trigger FAILS CLOSED against a
 	// member-/team-scoped private-ish allow-list and can never smuggle itself
 	// onto someone's specific-people grant.
-	workspaceBroad := actorType == "agent" || actorType == "system"
+	workspaceBroad := actorType == "agent" || actorType == "system" || actorType == "service_principal"
 	isWorkspaceMember := false
 	if effectiveUser != "" {
 		if _, err := h.getWorkspaceMember(ctx, effectiveUser, workspaceID); err == nil {

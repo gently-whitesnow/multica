@@ -3163,6 +3163,15 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if _, err := h.Queries.GetExternalIssueRefByIssue(r.Context(), db.GetExternalIssueRefByIssueParams{
+		WorkspaceID: issue.WorkspaceID, IssueID: issue.ID,
+	}); err == nil {
+		writeError(w, http.StatusConflict, "externally referenced issues cannot be deleted")
+		return
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to verify external issue reference")
+		return
+	}
 
 	h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
@@ -3537,6 +3546,14 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: wsUUID,
 		})
 		if err != nil {
+			continue
+		}
+		if _, err := h.Queries.GetExternalIssueRefByIssue(r.Context(), db.GetExternalIssueRefByIssueParams{
+			WorkspaceID: issue.WorkspaceID, IssueID: issue.ID,
+		}); err == nil {
+			continue
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("batch delete external ref lookup failed", "issue_id", issueID, "error", err)
 			continue
 		}
 

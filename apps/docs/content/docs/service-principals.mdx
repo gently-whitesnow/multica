@@ -36,11 +36,68 @@ Use `Authorization: Bearer msp_...`. A principal can call
 accountable owner, and fixed scopes. This endpoint grants no business access.
 
 Supported scopes are `projections:create`, `projections:read`,
-`projections:update`, `approvals:read`, and `approvals:decide`. Projection and
-approval endpoints are introduced separately; every such endpoint must opt into
-one exact scope. A missing, unknown, or merely prefix-matching scope returns
-`403 Forbidden`.
+`projections:update`, `approvals:read`, and `approvals:decide`. Every integration
+endpoint opts into one exact scope. A missing, unknown, or merely
+prefix-matching scope returns `403 Forbidden`.
+
+## Immutable external issues
+
+`POST /api/integration/issues` atomically creates or returns the issue bound to
+an external task. It requires `projections:create`:
+
+```json
+{
+  "external_issue_ref": {
+    "provider": "overtime",
+    "instance_id": "primary",
+    "external_id": "task-1842",
+    "external_url": "https://overtime.example/tasks/task-1842"
+  },
+  "issue": {
+    "title": "Implement invoice export",
+    "description": "Source: Overtime task task-1842",
+    "status": "todo",
+    "priority": "medium",
+    "assignee_type": "agent",
+    "assignee_id": "00000000-0000-0000-0000-000000000000",
+    "project_id": "00000000-0000-0000-0000-000000000000"
+  }
+}
+```
+
+The immutable identity is `(workspace, provider, instance_id, external_id)`.
+The first request returns `201` and `created: true`; an identical retry returns
+`200`, `created: false`, and the original issue. A different normalized issue
+payload or backlink for the same key returns `409` and does not mutate the
+existing issue. Terminal issues are returned as-is and are never reopened.
+
+Resolve a reference with `projections:read`:
+
+```text
+GET /api/integration/issues?provider=overtime&instance_id=primary&external_id=task-1842
+```
+
+Responses contain `external_issue_ref`, the current `issue`, a stable
+`issue_path`, and `issue_url` when the deployment has configured
+`MULTICA_APP_URL` or `FRONTEND_ORIGIN`. The backlink must be HTTP(S) and cannot
+contain user credentials or query parameters. Neither credentials nor the
+internal payload digest are returned.
+
+The CLI exposes the same contract. Supply the service-principal credential via
+`MULTICA_TOKEN` and its workspace via `MULTICA_WORKSPACE_ID`:
+
+```bash
+multica issue external create \
+  --provider overtime --instance-id primary --external-id task-1842 \
+  --external-url https://overtime.example/tasks/task-1842 \
+  --title "Implement invoice export" --assignee-type agent \
+  --assignee-id 00000000-0000-0000-0000-000000000000
+
+multica issue external get overtime primary task-1842
+```
 
 Service-principal credentials cannot call the member/agent API, manage their own
 scopes, become assignees or human approvers, start agents, access shell or
-repository/deployment secrets, or impersonate their owner.
+repository/deployment secrets, or impersonate their owner. A projection may
+record a workspace-invocable agent or squad as assignee, but creation does not
+enqueue a run; private and member-targeted invoke gates remain closed.

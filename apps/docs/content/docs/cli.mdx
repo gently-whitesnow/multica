@@ -101,6 +101,20 @@ multica issue comment add MUL-123 --content "Check the regression tests first"
 multica issue runs MUL-123
 ```
 
+External integrations use the immutable projection contract rather than the
+ordinary member issue command:
+
+```bash
+MULTICA_TOKEN=msp_... MULTICA_WORKSPACE_ID=<workspace-uuid> \
+  multica issue external create --provider overtime --instance-id primary \
+  --external-id task-1842 --title "Implement invoice export"
+
+multica issue external get overtime primary task-1842
+```
+
+An identical create retry prints the original issue and link. A changed payload
+for the same external key fails with `409`.
+
 Read long descriptions or comments from stdin to avoid dealing with newlines and quoting:
 
 ```bash
@@ -227,6 +241,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | `issue` | `list` | List issues | `--status`, `--priority`, `--assignee`, `--project`, `--metadata` (repeatable), `--limit`, `--offset`, `--sort`, `--full-id` |
 | | `get <id>` | Show a single issue | |
 | | `create` | Create an issue | `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable) |
+| | `external create/get` | Create-or-get an issue by immutable external reference | `create`: `--provider`, `--instance-id`, `--external-id`, `--title`, optional backlink/assignee/project; `get`: provider, instance ID, external ID |
 | | `update <id>` | Update issue fields | Same fields as `create`, plus `--position` |
 | | `assign <id>` | Assign or unassign | `--to` (fuzzy name match against members, agents, and squads), `--to-id`, `--unassign` |
 | | `status <id> <status>` | Change status | |
