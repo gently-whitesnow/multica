@@ -175,6 +175,11 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}
+				// Agent attribution belongs only to the trusted task-token path.
+				// A service-principal caller may know a valid agent/task pair, but
+				// those client-supplied headers must never change its actor class.
+				r.Header.Del("X-Agent-ID")
+				r.Header.Del("X-Task-ID")
 				r.Header.Set("X-Workspace-ID", uuidToString(principal.WorkspaceID))
 				r.Header.Set("X-Actor-Source", "service_principal")
 				r.Header.Set("X-Service-Principal-ID", uuidToString(principal.ID))

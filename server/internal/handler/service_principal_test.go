@@ -142,3 +142,44 @@ func TestServicePrincipalHashIsNotRecoverable(t *testing.T) {
 		t.Fatalf("unknown hash must fail closed, got %v", err)
 	}
 }
+
+// Service-principal authentication must remove legacy agent-attribution
+// headers. Otherwise a caller that knows a valid agent/task pair is classified
+// as that agent by resolveActor inside any scoped integration handler that uses
+// the repository's standard attribution path.
+func TestServicePrincipalCannotForgeAgentIdentityHeaders(t *testing.T) {
+	fx := setupRevocationFixture(t, "handler-tests-principal-agent-forge", "daemon-principal-agent-forge")
+	ctx := context.Background()
+	rawCredential := "msp_agent_header_repro"
+
+	var principalID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO service_principal (
+    workspace_id, owner_user_id, created_by_user_id, name, scopes, token_hash, token_prefix
+)
+VALUES ($1, $2, $2, 'header forgery probe', ARRAY['projections:read'], $3, 'msp_agent_he')
+RETURNING id
+`, fx.WorkspaceID, fx.TargetUserID, auth.HashToken(rawCredential)).Scan(&principalID); err != nil {
+		t.Fatalf("insert service principal: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM service_principal WHERE id = $1`, principalID)
+	})
+
+	authHandler := middleware.Auth(testHandler.Queries, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		actorType, actorID := testHandler.resolveActor(r, "", fx.WorkspaceID)
+		if actorType == "agent" {
+			t.Fatalf("service principal was reclassified as forged agent %s", actorID)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/integration/projections", nil)
+	req.Header.Set("Authorization", "Bearer "+rawCredential)
+	req.Header.Set("X-Agent-ID", fx.AgentID)
+	req.Header.Set("X-Task-ID", fx.TaskID)
+	w := httptest.NewRecorder()
+	authHandler.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("auth status = %d: %s", w.Code, w.Body.String())
+	}
+}

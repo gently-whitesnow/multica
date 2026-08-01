@@ -4,6 +4,12 @@ INSERT INTO service_principal (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
+-- name: LockServicePrincipalOwner :exec
+SELECT pg_advisory_xact_lock(hashtextextended(
+    sqlc.arg(workspace_id)::uuid::text || ':' ||
+    sqlc.arg(owner_user_id)::uuid::text || ':service-principal-owner', 0
+));
+
 -- name: ListServicePrincipalsByWorkspace :many
 SELECT * FROM service_principal
 WHERE workspace_id = $1
@@ -27,6 +33,12 @@ RETURNING *;
 UPDATE service_principal
 SET status = 'revoked', revoked_at = now(), updated_at = now()
 WHERE id = $1 AND workspace_id = $2 AND status = 'active'
+RETURNING *;
+
+-- name: RevokeServicePrincipalsByOwner :many
+UPDATE service_principal
+SET status = 'revoked', revoked_at = now(), updated_at = now()
+WHERE workspace_id = $1 AND owner_user_id = $2 AND status = 'active'
 RETURNING *;
 
 -- name: UpdateServicePrincipalLastUsed :exec

@@ -116,10 +116,24 @@ func (h *Handler) CreateServicePrincipal(w http.ResponseWriter, r *http.Request)
 	}
 	defer tx.Rollback(r.Context())
 	q := h.Queries.WithTx(tx)
+	workspaceUUID := parseUUID(workspaceID)
+	userUUID := parseUUID(userID)
+	if err := q.LockServicePrincipalOwner(r.Context(), db.LockServicePrincipalOwnerParams{
+		WorkspaceID: workspaceUUID, OwnerUserID: userUUID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create service principal")
+		return
+	}
+	if _, err := q.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+		UserID: userUUID, WorkspaceID: workspaceUUID,
+	}); err != nil {
+		writeError(w, http.StatusForbidden, "workspace membership changed")
+		return
+	}
 	principal, err := q.CreateServicePrincipal(r.Context(), db.CreateServicePrincipalParams{
-		WorkspaceID:     parseUUID(workspaceID),
-		OwnerUserID:     parseUUID(userID),
-		CreatedByUserID: parseUUID(userID),
+		WorkspaceID:     workspaceUUID,
+		OwnerUserID:     userUUID,
+		CreatedByUserID: userUUID,
 		Name:            req.Name,
 		Scopes:          scopes,
 		TokenHash:       auth.HashToken(raw),

@@ -155,6 +155,23 @@ func (q *Queries) ListServicePrincipalsByWorkspace(ctx context.Context, workspac
 	return items, nil
 }
 
+const lockServicePrincipalOwner = `-- name: LockServicePrincipalOwner :exec
+SELECT pg_advisory_xact_lock(hashtextextended(
+    $1::uuid::text || ':' ||
+    $2::uuid::text || ':service-principal-owner', 0
+))
+`
+
+type LockServicePrincipalOwnerParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+}
+
+func (q *Queries) LockServicePrincipalOwner(ctx context.Context, arg LockServicePrincipalOwnerParams) error {
+	_, err := q.db.Exec(ctx, lockServicePrincipalOwner, arg.WorkspaceID, arg.OwnerUserID)
+	return err
+}
+
 const revokeServicePrincipal = `-- name: RevokeServicePrincipal :one
 UPDATE service_principal
 SET status = 'revoked', revoked_at = now(), updated_at = now()
@@ -187,6 +204,53 @@ func (q *Queries) RevokeServicePrincipal(ctx context.Context, arg RevokeServiceP
 		&i.RevokedAt,
 	)
 	return i, err
+}
+
+const revokeServicePrincipalsByOwner = `-- name: RevokeServicePrincipalsByOwner :many
+UPDATE service_principal
+SET status = 'revoked', revoked_at = now(), updated_at = now()
+WHERE workspace_id = $1 AND owner_user_id = $2 AND status = 'active'
+RETURNING id, workspace_id, owner_user_id, created_by_user_id, name, scopes, token_hash, token_prefix, credential_version, status, last_used_at, created_at, updated_at, revoked_at
+`
+
+type RevokeServicePrincipalsByOwnerParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
+}
+
+func (q *Queries) RevokeServicePrincipalsByOwner(ctx context.Context, arg RevokeServicePrincipalsByOwnerParams) ([]ServicePrincipal, error) {
+	rows, err := q.db.Query(ctx, revokeServicePrincipalsByOwner, arg.WorkspaceID, arg.OwnerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ServicePrincipal{}
+	for rows.Next() {
+		var i ServicePrincipal
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.OwnerUserID,
+			&i.CreatedByUserID,
+			&i.Name,
+			&i.Scopes,
+			&i.TokenHash,
+			&i.TokenPrefix,
+			&i.CredentialVersion,
+			&i.Status,
+			&i.LastUsedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const rotateServicePrincipalCredential = `-- name: RotateServicePrincipalCredential :one
