@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -54,6 +55,13 @@ type externalIssueResponse struct {
 	IssueURL         string                   `json:"issue_url,omitempty"`
 	Created          bool                     `json:"created"`
 }
+
+type externalIssueCreateValidationError struct {
+	status  int
+	message string
+}
+
+func (e *externalIssueCreateValidationError) Error() string { return e.message }
 
 func normalizeExternalIssueRef(in externalIssueRefInput) (externalIssueRefInput, string, bool) {
 	in.Provider = strings.ToLower(strings.TrimSpace(in.Provider))
@@ -166,10 +174,6 @@ func (h *Handler) CreateExternalIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		assigneeID = id
 	}
-	if status, errMsg := h.validateAssigneePair(r.Context(), r, uuidToString(workspaceID), assigneeType, assigneeID); status != 0 {
-		writeError(w, status, errMsg)
-		return
-	}
 	var projectID pgtype.UUID
 	if req.Issue.ProjectID != nil {
 		id, parsed := parseUUIDOrBadRequest(w, *req.Issue.ProjectID, "issue.project_id")
@@ -204,6 +208,7 @@ func (h *Handler) CreateExternalIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	canonical, _ := json.Marshal(canonicalPayload)
 	digest := sha256.Sum256(canonical)
+
 	result, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
 		WorkspaceID:    workspaceID,
 		Title:          req.Issue.Title,
@@ -228,6 +233,12 @@ func (h *Handler) CreateExternalIssue(w http.ResponseWriter, r *http.Request) {
 		ActorID:         uuidToString(principalID),
 		Platform:        "integration",
 		SuppressEnqueue: true,
+		ValidateNewExternalIssue: func(ctx context.Context) error {
+			if status, errMsg := h.validateAssigneePair(ctx, r, uuidToString(workspaceID), assigneeType, assigneeID); status != 0 {
+				return &externalIssueCreateValidationError{status: status, message: errMsg}
+			}
+			return nil
+		},
 		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, _ []db.IssueLabel) map[string]any {
 			return map[string]any{"issue": issueToResponse(issue, h.getIssuePrefix(r.Context(), issue.WorkspaceID))}
 		},
@@ -242,6 +253,11 @@ func (h *Handler) CreateExternalIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, service.ErrProjectNotFound) {
 		writeError(w, http.StatusBadRequest, "project not found in this workspace")
+		return
+	}
+	var validationErr *externalIssueCreateValidationError
+	if errors.As(err, &validationErr) {
+		writeError(w, validationErr.status, validationErr.message)
 		return
 	}
 	if err != nil {

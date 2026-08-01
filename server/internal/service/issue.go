@@ -132,6 +132,11 @@ type IssueCreateOpts struct {
 	// is required for service-principal projections: their scopes permit issue
 	// projection writes, never direct agent execution.
 	SuppressEnqueue bool
+
+	// ValidateNewExternalIssue runs after an external reference has been resolved
+	// as new, but before any issue state is written. Existing immutable
+	// bindings return before this mutable eligibility check.
+	ValidateNewExternalIssue func(context.Context) error
 }
 
 // ErrActiveDuplicate signals that the duplicate guard found an active
@@ -237,6 +242,11 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return IssueCreateResult{}, fmt.Errorf("get external issue ref: %w", err)
+		}
+		if opts.ValidateNewExternalIssue != nil {
+			if err := opts.ValidateNewExternalIssue(ctx); err != nil {
+				return IssueCreateResult{}, err
+			}
 		}
 	}
 

@@ -226,10 +226,10 @@ func TestCreateExternalIssueRetryReturnsOriginalAfterAssigneeArchived(t *testing
 	provider, instanceID, externalID := "overtime", "archived-assignee", uuid.NewString()
 	cleanupExternalIssue(t, provider, instanceID, externalID)
 	agentID := createHandlerTestAgent(t, "External projection archived retry "+externalID[:8], nil)
-	request := func() *http.Request {
+	request := func(requestExternalID string) *http.Request {
 		req := newRequest(http.MethodPost, "/api/integration/issues", map[string]any{
 			"external_issue_ref": map[string]any{
-				"provider": provider, "instance_id": instanceID, "external_id": externalID,
+				"provider": provider, "instance_id": instanceID, "external_id": requestExternalID,
 			},
 			"issue": map[string]any{
 				"title": "Assigned projection", "status": "backlog",
@@ -243,7 +243,7 @@ func TestCreateExternalIssueRetryReturnsOriginalAfterAssigneeArchived(t *testing
 	}
 
 	createdW := httptest.NewRecorder()
-	testHandler.CreateExternalIssue(createdW, request())
+	testHandler.CreateExternalIssue(createdW, request(externalID))
 	if createdW.Code != http.StatusCreated {
 		t.Fatalf("create status = %d: %s", createdW.Code, createdW.Body.String())
 	}
@@ -256,12 +256,18 @@ func TestCreateExternalIssueRetryReturnsOriginalAfterAssigneeArchived(t *testing
 	// Simulate a lost 201 response. The immutable binding already exists, so
 	// an identical retry must resolve it even if mutable assignee state changed.
 	retryW := httptest.NewRecorder()
-	testHandler.CreateExternalIssue(retryW, request())
+	testHandler.CreateExternalIssue(retryW, request(externalID))
 	if retryW.Code != http.StatusOK {
 		t.Fatalf("retry status = %d, want 200: %s", retryW.Code, retryW.Body.String())
 	}
 	retried := decodeExternalIssueResponse(t, retryW)
 	if retried.Created || retried.Issue.ID != created.Issue.ID {
 		t.Fatalf("retry did not return original issue: %+v", retried)
+	}
+
+	newKeyW := httptest.NewRecorder()
+	testHandler.CreateExternalIssue(newKeyW, request(uuid.NewString()))
+	if newKeyW.Code != http.StatusBadRequest {
+		t.Fatalf("new key with archived assignee status = %d, want 400: %s", newKeyW.Code, newKeyW.Body.String())
 	}
 }
