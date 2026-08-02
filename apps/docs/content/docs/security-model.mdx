@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 When an agent picks up a task, the daemon spawns an AI coding tool (Codex, Claude Code, and so on) as a child process. Understanding what that process can touch is the whole security model.
 
-## The boundary is the daemon user
+## Default boundary: the daemon user
 
 By default a task runs with the **full permissions of the operating-system user running the daemon**. It can read and write every file that user can, use that user's credentials, and reach the network without restriction.
 
@@ -20,6 +20,19 @@ Multica does not sandbox the filesystem for you. If the daemon runs as your pers
 This is deliberate. Agents are asked to install dependencies, run builds, use your cloud CLIs, and drive tooling that expects a normal home directory. A partial filesystem sandbox breaks that work in ways that are hard to diagnose — the tool reports "not logged in" or silently uses the wrong account — while still not protecting the thing that matters most, since it cannot stop a task from reading credentials and sending them over the network.
 
 So Multica does not pretend to be the boundary. Put one around it.
+
+Linux operators that need the task and control plane to have different OS
+identities can opt into the built-in fail-closed executor with
+`MULTICA_LINUX_TASK_ISOLATION=required`. It creates a fresh system user for
+each task, gives that user only the current managed task root and a new `HOME`,
+and removes the user after success, failure, cancellation, or timeout. A root
+supervisor also watches the daemon PID and kills every process with the task
+UID if the daemon crashes. If identity creation, isolated launch, or cleanup
+fails, the daemon reports task failure; it never retries as the daemon user.
+
+This mode deliberately rejects `local_directory` resources: granting an
+ephemeral task identity access to an operator-owned checkout would break the
+boundary. See the fork's [Linux deployment contract](https://github.com/gently-whitesnow/multica/blob/main/docs/linux-task-isolation.md) for the sudo rule, permissions, credential model, and runtime test.
 
 ## Recommended setups
 
@@ -42,7 +55,7 @@ These are real, but they are conveniences and blast-radius reduction — not a s
 ## What is not a boundary
 
 - **The coding tool's own sandbox and approval settings.** Multica runs agents unattended, so approval prompts are answered automatically. On the default path the filesystem sandbox is off as well: Codex runs with `sandbox_mode = "danger-full-access"` and Claude Code with `--permission-mode bypassPermissions`. The exception is Windows — if you explicitly configure Codex's native sandbox (`windows.sandbox = "unelevated"` or `"elevated"`), Multica honors that opt-in and keeps `workspace-write` for those tasks. Worth doing where it fits, but it is one tool on one platform and it does not change how you should scope the daemon user.
-- **Your `HOME` directory layout.** Tasks inherit the daemon user's real `HOME` and `XDG_*` variables, which is what makes host CLIs (`gh`, `aws`, `kubectl`, `gcloud`, `glab`) work inside a task exactly as they do in your shell. It also means everything under that home is reachable.
+- **Your `HOME` directory layout on the default path.** Tasks inherit the daemon user's real `HOME` and `XDG_*` variables, which is what makes host CLIs (`gh`, `aws`, `kubectl`, `gcloud`, `glab`) work inside a task exactly as they do in your shell. It also means everything under that home is reachable. Required Linux task isolation replaces those paths with a task-owned home and does not project daemon files into it.
 
 <Callout>
 On Linux, Codex tasks previously ran under the `workspace-write` sandbox with a redirected per-task `HOME`. That was removed: it left host CLIs unconfigured inside tasks, and because it restricted writes only, it never prevented a task from reading and exfiltrating credentials. Linux now matches the macOS and Windows default.

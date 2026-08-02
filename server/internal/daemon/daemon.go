@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/daemon/tasksandbox"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -5043,6 +5044,34 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}()
 
+	var taskSandbox tasksandbox.Session
+	var taskSandboxExecutable string
+	if d.cfg.RequireLinuxTaskIsolation {
+		if env.LocalDirectory {
+			return TaskResult{}, errors.New("task sandbox: local_directory resources are not supported; refusing to expose a daemon-owned checkout")
+		}
+		selfBin, err := resolveSelfExecutable()
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("task sandbox: resolve multica executable: %w", err)
+		}
+		taskSandbox, err = tasksandbox.Prepare(prepareCtx, selfBin, task.ID, env.RootDir, env.WorkDir, taskLog)
+		if err != nil {
+			return TaskResult{}, err
+		}
+		taskSandboxExecutable = selfBin
+		defer func() {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cleanupCancel()
+			if err := taskSandbox.Close(cleanupCtx); err != nil {
+				taskLog.Error("task sandbox cleanup failed", "error", err)
+				if returnErr == nil {
+					returnErr = err
+					taskResult = TaskResult{}
+				}
+			}
+		}()
+	}
+
 	// Issue #3999 race A: now that env.WorkDir is on disk, transition the
 	// server-side state machine dispatched (or waiting_local_directory) →
 	// running. Calling StartTask before Prepare/Reuse let any consumer
@@ -5173,10 +5202,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
-	// HOME and the XDG base dirs are deliberately not touched here: tasks run
-	// with the daemon user's real home on every platform, so host CLI config
-	// and credentials resolve inside a task exactly as they do in the daemon
-	// user's shell (MUL-5578).
+	backendExecutable := entry.Path
+	if taskSandbox != nil {
+		for key, value := range taskSandbox.Environment(entry.Path) {
+			agentEnv[key] = value
+		}
+		backendExecutable = taskSandboxExecutable
+	}
+	// Without required Linux isolation, HOME and XDG retain the historical
+	// daemon-user contract. The sandbox path above replaces them with a
+	// task-owned home and never copies daemon profile/config/log state into it.
 	// (Hermes HERMES_HOME is applied after custom_env below so the per-task
 	// overlay can win over a user-set HERMES_HOME; see
 	// layerCustomEnvAndHermesHome.)
@@ -5217,7 +5252,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, err
 	}
 	backend, err := agent.New(provider, agent.Config{
-		ExecutablePath: entry.Path,
+		ExecutablePath: backendExecutable,
 		CLIVersion:     resolvedVersion,
 		Env:            agentEnv,
 		Logger:         d.logger,

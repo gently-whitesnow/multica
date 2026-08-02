@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/daemon/tasksandbox"
 )
 
 var (
@@ -97,6 +99,20 @@ func init() {
 }
 
 func main() {
+	if len(os.Args) >= 3 && os.Args[1] == tasksandbox.RootHelperArg {
+		if err := tasksandbox.RunRootHelper(os.Args[2:], tasksandbox.Stdio{In: os.Stdin, Out: os.Stdout, Err: os.Stderr}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if os.Getenv(tasksandbox.EnvEnabled) == "1" {
+		if err := tasksandbox.RunWrapper(context.Background(), os.Args[1:], tasksandbox.Stdio{In: os.Stdin, Out: os.Stdout, Err: os.Stderr}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == execenv.PreparationHelperArg {
 		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 		if err := execenv.RunPreparationHelper(os.Stdin, os.Stdout, logger); err != nil {
