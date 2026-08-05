@@ -79,18 +79,15 @@ func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) contex
 func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Actor attribution headers are server-set only — strip
-			// any client-supplied value before any branch can
-			// re-stamp them. This is the SAME set Auth middleware
-			// strips (see stripClientActorHeaders) and keeps the
-			// contract uniform across both middlewares: a downstream
-			// guard like handler.RequireHumanActor, and the request
-			// logger's machine attribution, can trust these headers
-			// regardless of which auth path the request arrived on.
-			// The mdt_ branch below never sets a user or
-			// service-principal identity, so on that path these stay
-			// empty rather than echoing whatever the caller sent.
-			stripClientActorHeaders(r)
+			// X-Actor-Source is server-set only — strip any
+			// client-supplied value before any branch can re-stamp
+			// it. This mirrors what Auth middleware does (see auth.go
+			// "X-Actor-Source is server-set only..." comment) and
+			// keeps the contract uniform across both middlewares: a
+			// downstream guard like handler.RequireHumanActor can
+			// trust this header regardless of which auth path the
+			// request arrived on.
+			r.Header.Del("X-Actor-Source")
 
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {

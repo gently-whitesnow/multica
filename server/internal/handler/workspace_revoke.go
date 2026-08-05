@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -62,33 +61,6 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		UserID:      userID,
 	}); err != nil {
 		return empty, err
-	}
-	if err := qtx.LockServicePrincipalOwner(ctx, db.LockServicePrincipalOwnerParams{
-		WorkspaceID: workspaceID,
-		OwnerUserID: userID,
-	}); err != nil {
-		return empty, err
-	}
-
-	// A service principal is usable independently of its accountable owner's
-	// member session. Revoke every active credential before removing that owner,
-	// in this transaction, so commit and rollback cover both lifecycle changes.
-	principals, err := qtx.RevokeServicePrincipalsByOwner(ctx, db.RevokeServicePrincipalsByOwnerParams{
-		WorkspaceID: workspaceID,
-		OwnerUserID: userID,
-	})
-	if err != nil {
-		return empty, err
-	}
-	for _, principal := range principals {
-		details, _ := json.Marshal(map[string]any{"credential_version": principal.CredentialVersion})
-		if err := qtx.CreateServicePrincipalAudit(ctx, db.CreateServicePrincipalAuditParams{
-			WorkspaceID: principal.WorkspaceID, ServicePrincipalID: principal.ID,
-			ActorType: "member", ActorID: archivedBy, OwnerUserID: principal.OwnerUserID,
-			Action: "revoked", Details: details,
-		}); err != nil {
-			return empty, err
-		}
 	}
 
 	runtimes, err := qtx.ListAgentRuntimesByOwner(ctx, db.ListAgentRuntimesByOwnerParams{

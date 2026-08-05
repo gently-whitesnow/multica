@@ -22,8 +22,7 @@ func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 //  1. Authorization: Bearer <token> header (PAT or JWT)
 //  2. multica_auth HttpOnly cookie (JWT) — requires valid CSRF token for state-changing requests
 //
-// Sets human or machine identity headers for downstream handlers. Service
-// principals deliberately do not receive X-User-ID.
+// Sets X-User-ID and X-User-Email headers on the request for downstream handlers.
 //
 // patCache is optional; when non-nil, PAT lookups are cached with a short
 // TTL (auth.AuthCacheTTL). On cache hit the middleware skips both the DB
@@ -45,7 +44,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// plus a forged `X-Actor-Source: member` (or anything else)
 			// to convince a downstream handler that its request came
 			// from a non-task-token path.
-			stripClientActorHeaders(r)
+			r.Header.Del("X-Actor-Source")
 
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
@@ -150,37 +149,6 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// treated as the owner having approved an account-
 				// level action.
 				r.Header.Set("X-Actor-Source", "cloud_pat")
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Service principal credential. Unlike task and cloud-node tokens,
-			// this is a first-class machine identity, not an impersonation of its
-			// owner. The owner is a separate audit attribute and is deliberately not
-			// copied into X-User-ID, so downstream code cannot mistake the machine
-			// for a member.
-			if strings.HasPrefix(tokenString, "msp_") {
-				if queries == nil {
-					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-					return
-				}
-				principal, err := queries.GetServicePrincipalByTokenHash(r.Context(), auth.HashToken(tokenString))
-				if err != nil {
-					slog.Warn("auth: invalid service principal credential", "path", r.URL.Path, "error", err)
-					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-					return
-				}
-				// Agent attribution belongs only to the trusted task-token path.
-				// A service-principal caller may know a valid agent/task pair, but
-				// those client-supplied headers must never change its actor class.
-				r.Header.Del("X-Agent-ID")
-				r.Header.Del("X-Task-ID")
-				r.Header.Set("X-Workspace-ID", uuidToString(principal.WorkspaceID))
-				r.Header.Set("X-Actor-Source", servicePrincipalSource)
-				r.Header.Set("X-Service-Principal-ID", uuidToString(principal.ID))
-				r.Header.Set("X-Service-Principal-Scopes", strings.Join(principal.Scopes, ","))
-				r.Header.Set("X-Credential-Owner-ID", uuidToString(principal.OwnerUserID))
-				_ = queries.UpdateServicePrincipalLastUsed(r.Context(), principal.ID)
 				next.ServeHTTP(w, r)
 				return
 			}

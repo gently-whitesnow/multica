@@ -110,12 +110,6 @@ ws_channel_installations AS MATERIALIZED (
 ws_lark_installations AS MATERIALIZED (
     SELECT id FROM lark_installation WHERE workspace_id = $1
 ),
-deleted_service_principal_audit AS (
-    DELETE FROM service_principal_audit WHERE workspace_id = $1
-),
-deleted_service_principals AS (
-    DELETE FROM service_principal WHERE workspace_id = $1
-),
 deleted_task_usage AS (
     DELETE FROM task_usage
     WHERE task_id IN (SELECT id FROM ws_tasks)
@@ -153,6 +147,12 @@ deleted_draft_restores AS (
     DELETE FROM chat_draft_restore
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
        OR task_id IN (SELECT id FROM ws_tasks)
+),
+-- Same no-FK chore as chat_draft_restore above. Matched on workspace_id rather
+-- than the session set because that column exists precisely so this statement
+-- does not have to join through chat_session, which it deletes in this same CTE.
+deleted_agent_builder_drafts AS (
+    DELETE FROM agent_builder_draft WHERE workspace_id = $1
 ),
 deleted_comment_reactions AS (
     DELETE FROM comment_reaction WHERE workspace_id = $1

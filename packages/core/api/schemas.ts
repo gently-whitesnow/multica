@@ -5,6 +5,7 @@ import type {
   AgentTemplateSummary,
   AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
+  AgentBuilderSessionSummary,
   Attachment,
   AutopilotRun,
   BillingBalance,
@@ -16,6 +17,9 @@ import type {
   CancelTaskResponse,
   ChatMessage,
   ChatDraftRestoresResponse,
+  ChatPendingTask,
+  PrioritizeQueuedChatTaskResponse,
+  SendChatMessageResponse,
   Comment,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
@@ -1231,6 +1235,52 @@ export const ChatDraftRestoresResponseSchema = z.object({
   restores: z.array(ChatDraftRestoreSchema).default([]),
 }).loose();
 
+const ChatQueuedTaskSchema = z.object({
+  task_id: z.string(),
+  status: z.string().default("queued"),
+  created_at: z.string().default(""),
+  message_id: z.string().optional(),
+  content: z.string().optional(),
+}).loose();
+
+const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
+  tasks.flatMap((task) => {
+    const parsed = ChatQueuedTaskSchema.safeParse(task);
+    return parsed.success ? [parsed.data] : [];
+  }),
+);
+
+// Root fields retain the legacy single-task response shape. Keep additive
+// fields optional so callers can distinguish an older server from an empty
+// queue. A malformed queue row is ignored without discarding a valid head.
+export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
+  task_id: z.string().optional(),
+  status: z.string().optional(),
+  created_at: z.string().optional(),
+  supports_queue: z.boolean().optional(),
+  queued_tasks: ChatQueuedTasksSchema.optional(),
+}).loose();
+
+export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
+
+export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
+  message_id: z.string().min(1),
+  task_id: z.string().min(1),
+  supports_queue: z.boolean().optional(),
+  queued: z.boolean().optional().catch(undefined),
+  created_at: z.string().min(1),
+  attachment_ids: z.array(z.string()).nullish().transform((ids) => ids ?? undefined),
+}).loose();
+
+export const PrioritizeQueuedChatTaskResponseSchema:
+  z.ZodType<PrioritizeQueuedChatTaskResponse> = z.object({
+    task_id: z.string(),
+    active_task_id: z.string().optional(),
+  }).loose();
+
+export const EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE:
+  PrioritizeQueuedChatTaskResponse = { task_id: "" };
+
 export const EMPTY_CHAT_DRAFT_RESTORES: ChatDraftRestoresResponse = {
   restores: [],
 };
@@ -1379,6 +1429,56 @@ export const EMPTY_AGENT_BUILDER_SESSION: AgentBuilderSession = {
   builder_agent_id: "",
   runtime_id: "",
 };
+
+/**
+ * The stored configuration of a creation conversation. Every field falls back
+ * to empty on its own: a draft written by a newer build (or truncated in
+ * transit) must still restore the fields it does understand rather than
+ * discarding the user's work wholesale.
+ */
+export const StoredAgentDraftSchema = z.object({
+  name: z.string().catch(""),
+  description: z.string().catch(""),
+  instructions: z.string().catch(""),
+  avatar_url: z.string().nullable().catch(null),
+  model: z.string().catch(""),
+  thinking_level: z.string().catch(""),
+  service_tier: z.string().catch(""),
+  skill_ids: z.array(z.string()).catch([]),
+  permission_scope: z
+    .enum(["private", "workspace", "members"])
+    .catch("private"),
+  member_ids: z.array(z.string()).catch([]),
+  team_ids: z.array(z.string()).catch([]),
+  applied_message_id: z.string().nullable().catch(null),
+}).loose();
+
+/**
+ * One unfinished creation draft. Every field except the id has a safe empty
+ * default: an older server that omits `runtime_id` must degrade to "let the
+ * user pick" rather than dropping the whole row and losing the conversation.
+ */
+export const AgentBuilderSessionSummarySchema = z.object({
+  session_id: z.string(),
+  title: z.string().catch(""),
+  runtime_id: z.string().catch(""),
+  created_at: z.string().catch(""),
+  updated_at: z.string().catch(""),
+  last_message_content: z.string().catch(""),
+  last_message_role: z.string().catch(""),
+  last_message_at: z.string().catch(""),
+  // Absent for a conversation the user has never hand-edited; the client then
+  // replays the last <agent_draft> block instead of restoring a stored copy.
+  draft: StoredAgentDraftSchema.nullish().catch(null),
+}).loose();
+
+export const AgentBuilderSessionListSchema = z.object({
+  sessions: z.array(AgentBuilderSessionSummarySchema).catch([]),
+}).loose();
+
+export const EMPTY_AGENT_BUILDER_SESSION_LIST: {
+  sessions: AgentBuilderSessionSummary[];
+} = { sessions: [] };
 
 export const AgentBuilderRuntimeSwitchSchema = z.object({
   runtime_id: z.string(),

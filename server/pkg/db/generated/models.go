@@ -54,6 +54,13 @@ type Agent struct {
 	ServiceTier           pgtype.Text `json:"service_tier"`
 }
 
+type AgentBuilderDraft struct {
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Draft         []byte             `json:"draft"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 // Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target); targets stack and canInvokeAgent OR-matches. workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to. No DB foreign keys: agent_id / created_by / member target_id relationships are maintained in the application layer (see migration comment).
 type AgentInvocationTarget struct {
 	ID         pgtype.UUID        `json:"id"`
@@ -195,6 +202,7 @@ type Autopilot struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	AssigneeType       string             `json:"assignee_type"`
 	ProjectID          pgtype.UUID        `json:"project_id"`
+	PauseReason        pgtype.Text        `json:"pause_reason"`
 }
 
 type AutopilotCollaborator struct {
@@ -897,35 +905,6 @@ type RuntimeProfile struct {
 	Enabled        bool               `json:"enabled"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-}
-
-type ServicePrincipal struct {
-	ID                pgtype.UUID        `json:"id"`
-	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
-	OwnerUserID       pgtype.UUID        `json:"owner_user_id"`
-	CreatedByUserID   pgtype.UUID        `json:"created_by_user_id"`
-	Name              string             `json:"name"`
-	Scopes            []string           `json:"scopes"`
-	TokenHash         string             `json:"token_hash"`
-	TokenPrefix       string             `json:"token_prefix"`
-	CredentialVersion int32              `json:"credential_version"`
-	Status            string             `json:"status"`
-	LastUsedAt        pgtype.Timestamptz `json:"last_used_at"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	RevokedAt         pgtype.Timestamptz `json:"revoked_at"`
-}
-
-type ServicePrincipalAudit struct {
-	ID                 pgtype.UUID        `json:"id"`
-	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
-	ServicePrincipalID pgtype.UUID        `json:"service_principal_id"`
-	ActorType          string             `json:"actor_type"`
-	ActorID            pgtype.UUID        `json:"actor_id"`
-	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
-	Action             string             `json:"action"`
-	Details            []byte             `json:"details"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
 type Skill struct {
