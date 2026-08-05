@@ -59,7 +59,6 @@ func TestRequireHumanActor_BlocksMachineCredentials(t *testing.T) {
 		// of machine credential as mat_ for billing-authorization
 		// purposes.
 		{name: "cloud_pat", actorSource: "cloud_pat"},
-		{name: "service_principal", actorSource: "service_principal"},
 	}
 
 	for _, tc := range cases {
@@ -134,6 +133,7 @@ func TestRequireHumanActor_IgnoresUnknownActorSource(t *testing.T) {
 	}
 }
 
+
 // TestRequireHumanActor_AppliedViaChiRouterUse pins the wiring side of
 // the contract: when the guard is attached to a chi route group via
 // r.Use, every endpoint in that group is protected, and a task-token
@@ -156,19 +156,6 @@ func TestRequireHumanActor_AppliedViaChiRouterUse(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", w.Code)
-	}
-}
-
-func TestRejectServicePrincipalActor(t *testing.T) {
-	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Fatal("service principal reached member API")
-	})
-	req := httptest.NewRequest(http.MethodPost, "/api/issues", nil)
-	req.Header.Set("X-Actor-Source", "service_principal")
-	w := httptest.NewRecorder()
-	RejectServicePrincipalActor(next).ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", w.Code)
 	}

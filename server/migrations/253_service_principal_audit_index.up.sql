@@ -1,1 +1,0 @@
-CREATE INDEX CONCURRENTLY service_principal_audit_principal_idx ON service_principal_audit (service_principal_id, created_at DESC);

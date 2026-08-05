@@ -24,6 +24,7 @@ import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { ChatMessageList, ChatMessageSkeleton } from "./components/chat-message-list";
 import { ChatInput } from "./components/chat-input";
+import { ChatQueue } from "./components/chat-queue";
 import { ChatThreadList } from "./components/chat-thread-list";
 import { ChatSessionHeader } from "./components/chat-session-header";
 import { EmptyState } from "./components/chat-empty-state";
@@ -32,6 +33,7 @@ import { useChatController } from "./components/use-chat-controller";
 import { OfflineBanner } from "./components/offline-banner";
 import { NoAgentBanner } from "./components/no-agent-banner";
 import { ArchivedAgentBanner } from "./components/archived-agent-banner";
+import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
 
 /**
  * Chat tab — the first-class two-pane surface (thread list on the left,
@@ -239,6 +241,7 @@ export function ChatPage() {
   // No compose-box agent selector — the agent is fixed when the chat starts.
   // `@container`: the conversation column's gutter (CHAT_GUTTER) widens with
   // THIS pane, which the user resizes independently of the browser window.
+  const queuedTasks = c.pendingTask?.queued_tasks ?? [];
   const conversation = (
     <div className="flex flex-1 flex-col min-h-0 @container">
       {c.currentSession && (
@@ -262,7 +265,11 @@ export function ChatPage() {
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
           onQuickAction={(action) => c.handleSend(action.prompt)}
           quickActionsDisabled={
-            !!c.pendingTaskId || c.isSessionArchived || c.isAgentArchived || c.noAgent
+            !!c.pendingTaskId ||
+            c.isSessionArchived ||
+            c.isAgentArchived ||
+            !c.isAgentRuntimeBound ||
+            c.noAgent
           }
           onRegenerateQuickActions={(message) =>
             c.activeSessionId
@@ -282,9 +289,23 @@ export function ChatPage() {
         <NoAgentBanner />
       ) : c.isAgentArchived ? (
         <ArchivedAgentBanner agentName={c.activeAgent?.name} />
+      ) : !c.isAgentRuntimeBound && c.activeAgent ? (
+        <RuntimeRequiredBanner
+          agentId={c.activeAgent.id}
+          agentName={c.activeAgent.name}
+        />
       ) : (
         <OfflineBanner agentName={c.activeAgent?.name} availability={c.availability} />
       )}
+
+      <ChatQueue
+        tasks={queuedTasks}
+        headStatus={c.pendingTask?.status}
+        onSendNow={c.handleSendQueuedTaskNow}
+        onEdit={c.handleEditQueuedTask}
+        onRemove={c.handleRemoveQueuedTask}
+        onClear={c.handleClearQueuedTasks}
+      />
 
       <ChatInput
         onSend={c.handleSend}
@@ -293,9 +314,13 @@ export function ChatPage() {
         uploadEnabled={c.uploadEnabled}
         onStop={c.handleStop}
         isRunning={!!c.pendingTaskId}
-        disabled={c.isSessionArchived || c.isAgentArchived}
+        allowSubmitWhileRunning={c.pendingTask?.supports_queue === true}
+        disabled={
+          c.isSessionArchived || c.isAgentArchived || !c.isAgentRuntimeBound
+        }
         noAgent={c.noAgent}
         agentArchived={c.isAgentArchived}
+        agentRuntimeRequired={!c.isAgentRuntimeBound}
         agentName={c.activeAgent?.name}
         projects={c.projects}
         projectId={c.activeProjectId}

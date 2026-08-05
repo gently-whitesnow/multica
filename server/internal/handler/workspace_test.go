@@ -11,10 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/middleware"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"time"
 )
 
 func TestCreateWorkspace_RejectsReservedSlug(t *testing.T) {
@@ -1089,79 +1086,6 @@ func TestDeleteMember_RevokesTargetRuntimes(t *testing.T) {
 	assertRevoked(t, fx)
 }
 
-// A service-principal credential remains an externally usable workspace key
-// even though its accountable owner is the member being removed. Member
-// revocation must therefore invalidate the principal in the same transaction
-// as the member row, just like it invalidates that member's daemon tokens.
-func TestDeleteMember_RevokesOwnedServicePrincipals(t *testing.T) {
-	fx := setupRevocationFixture(t, "handler-tests-revoke-principal", "daemon-revoke-principal")
-	ctx := context.Background()
-	rawCredential := "msp_removed_owner_repro"
-
-	var principalID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO service_principal (
-    workspace_id, owner_user_id, created_by_user_id, name, scopes, token_hash, token_prefix
-)
-VALUES ($1, $2, $2, 'departing member integration', ARRAY['projections:read'], $3, 'msp_departin')
-RETURNING id
-`, fx.WorkspaceID, fx.TargetUserID, auth.HashToken(rawCredential)).Scan(&principalID); err != nil {
-		t.Fatalf("insert service principal: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM service_principal WHERE id = $1`, principalID)
-	})
-
-	// The bulk cleanup is safe to roll back: the credential remains active
-	// unless the enclosing member-removal transaction commits.
-	tx, err := testPool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin rollback probe: %v", err)
-	}
-	if _, err := testHandler.Queries.WithTx(tx).RevokeServicePrincipalsByOwner(ctx, db.RevokeServicePrincipalsByOwnerParams{
-		WorkspaceID: parseUUID(fx.WorkspaceID), OwnerUserID: parseUUID(fx.TargetUserID),
-	}); err != nil {
-		t.Fatalf("revoke in rollback probe: %v", err)
-	}
-	if err := tx.Rollback(ctx); err != nil {
-		t.Fatalf("rollback probe: %v", err)
-	}
-	if _, err := testHandler.Queries.GetServicePrincipalByTokenHash(ctx, auth.HashToken(rawCredential)); err != nil {
-		t.Fatalf("credential changed despite rollback: %v", err)
-	}
-
-	w := httptest.NewRecorder()
-	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
-	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
-	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
-	testHandler.DeleteMember(w, req)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
-	}
-
-	authReachedHandler := false
-	authHandler := middleware.Auth(testHandler.Queries, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		authReachedHandler = true
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	authReq := httptest.NewRequest(http.MethodGet, "/api/service-principal/identity", nil)
-	authReq.Header.Set("Authorization", "Bearer "+rawCredential)
-	authW := httptest.NewRecorder()
-	authHandler.ServeHTTP(authW, authReq)
-	if authW.Code != http.StatusUnauthorized || authReachedHandler {
-		t.Fatalf("removed member's service principal still authenticates: status=%d reached_handler=%v", authW.Code, authReachedHandler)
-	}
-
-	// Retrying the owner cleanup converges without touching the already-revoked
-	// principal or producing another lifecycle transition.
-	revokedAgain, err := testHandler.Queries.RevokeServicePrincipalsByOwner(ctx, db.RevokeServicePrincipalsByOwnerParams{
-		WorkspaceID: parseUUID(fx.WorkspaceID), OwnerUserID: parseUUID(fx.TargetUserID),
-	})
-	if err != nil || len(revokedAgain) != 0 {
-		t.Fatalf("repeated principal cleanup: revoked=%d err=%v", len(revokedAgain), err)
-	}
-}
-
 // TestDeleteMember_PrunesChannelUserBindings verifies the application-layer
 // replacement for the channel_user_binding member-FK cascade (MUL-3515 §4):
 // removing a member prunes that member's channel bindings, in the same tx as
@@ -1334,6 +1258,48 @@ RETURNING id
 	}
 	if otherStatus != "online" {
 		t.Fatalf("expected other-member runtime to stay online, got %q", otherStatus)
+	}
+}
+
+// TestDeleteMember_CancelsDeferredTasks covers the second caller of
+// CancelAgentTasksByRuntimeOrAgent. Member revocation must cancel a scheduled
+// fallback just like queued/running work; otherwise it could become claimable
+// after its owner and runtime access have been removed.
+func TestDeleteMember_CancelsDeferredTasks(t *testing.T) {
+	fx := setupRevocationFixture(t, "handler-tests-revoke-deferred", "daemon-revoke-deferred")
+	ctx := context.Background()
+
+	var deferredTaskID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, fire_at)
+VALUES ($1, $2, 'deferred', 0, now() + interval '1 hour')
+RETURNING id
+`, fx.AgentID, fx.RuntimeID).Scan(&deferredTaskID); err != nil {
+		t.Fatalf("insert deferred task: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
+	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
+	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
+	testHandler.DeleteMember(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	assertRevoked(t, fx)
+
+	var status string
+	var completedAt *time.Time
+	if err := testPool.QueryRow(ctx,
+		`SELECT status, completed_at FROM agent_task_queue WHERE id = $1`,
+		deferredTaskID,
+	).Scan(&status, &completedAt); err != nil {
+		t.Fatalf("query deferred task: %v", err)
+	}
+	if status != "cancelled" || completedAt == nil {
+		t.Fatalf("deferred task = (%q, %v), want cancelled with completed_at", status, completedAt)
 	}
 }
 

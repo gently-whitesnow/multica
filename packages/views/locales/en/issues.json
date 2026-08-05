@@ -308,7 +308,9 @@
     "unsubscribe_this": "Unsubscribe from this issue",
     "unsubscribe_subtree": "Unsubscribe from this issue and its sub-issues",
     "unsubscribe_subtree_failed": "Could not unsubscribe from the sub-issues. Please try again.",
+    "unsubscribe_subtree_succeeded": "Unsubscribed from this issue and its sub-issues.",
     "unsubscribe_subtree_unsupported": "This workspace's server does not support unsubscribing from sub-issues yet. Try again after the next update.",
+    "subscription_update_failed": "Could not update the subscription. Please try again.",
     "no_subscribers_results": "No results found",
     "change_subscribers_placeholder": "Change subscribers...",
     "members_group": "Members",
@@ -319,6 +321,26 @@
     "unpin_tooltip": "Unpin from sidebar",
     "thread_nav_label": "Jump to comment thread",
     "thread_nav_resolved_label": "{{title}} (resolved)",
+    "thread_nav": {
+      "button_label_one": "Comment threads ({{count}})",
+      "button_label_other": "Comment threads ({{count}})",
+      "search_placeholder": "Search threads or authors",
+      "match_count_one": "{{count}} match",
+      "match_count_other": "{{count}} matches",
+      "filter_all": "All",
+      "filter_unresolved": "Unresolved",
+      "filter_resolved": "Resolved",
+      "filter_mine": "@me",
+      "group": {
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "earlier": "Earlier"
+      },
+      "empty": "No threads match",
+      "hint_select": "select",
+      "hint_jump": "jump",
+      "hint_close": "close"
+    },
     "sidebar_tooltip": "Toggle sidebar",
     "find": {
       "placeholder": "Find in issue...",
@@ -390,10 +412,12 @@
     "trigger_blocked_invocation_not_allowed": "This target can't be found, or you don't have permission to use it",
     "trigger_blocked_target_unavailable": "This target is unavailable",
     "trigger_blocked_runtime_offline": "This target's runtime is offline",
+    "trigger_blocked_agent_runtime_required": "This target has no runtime — bind one to run it",
     "trigger_blocked_generic": "This target won't be triggered",
     "trigger_blocked_short_invocation_not_allowed": "Not found or no permission",
     "trigger_blocked_short_target_unavailable": "Unavailable",
     "trigger_blocked_short_runtime_offline": "Runtime offline",
+    "trigger_blocked_short_agent_runtime_required": "Needs a runtime",
     "trigger_blocked_short_generic": "Won't start",
     "send_reply_failed": "Failed to send reply",
     "delete_failed": "Failed to delete comment",
@@ -582,7 +606,7 @@
   "pickers": {
     "custom_property": {
       "empty": "Empty",
-      "clear_action": "Clear",
+      "none": "No value",
       "true_label": "Yes",
       "false_label": "No",
       "value_placeholder": "Enter value…",
@@ -598,15 +622,17 @@
       "search_placeholder": "Assign to...",
       "members_group": "Members",
       "agents_group": "Agents",
-      "squads_group": "Squads"
+      "squads_group": "Squads",
+      "agent_runtime_required": "Bind a runtime before assigning work to this agent",
+      "squad_runtime_required": "Bind a runtime to this squad's leader before assigning work"
     },
     "start_date": {
       "trigger_label": "Start date",
-      "clear_action": "Clear date"
+      "none": "No start date"
     },
     "due_date": {
       "trigger_label": "Due date",
-      "clear_action": "Clear date"
+      "none": "No due date"
     },
     "label": {
       "trigger_label": "Add label",

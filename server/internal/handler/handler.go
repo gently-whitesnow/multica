@@ -597,13 +597,8 @@ func requestUserID(r *http.Request) string {
 // review). The daemon always pairs the two headers, so requiring both has
 // no effect on legitimate agent callers but closes the impersonation path.
 //
-// Returns the server-authenticated service-principal or task-token actor when
-// present, ("agent", agentID) for a valid legacy attribution pair, and
-// ("member", userID) otherwise.
+// Returns ("agent", agentID) on success, ("member", userID) otherwise.
 func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
-	if r.Header.Get("X-Actor-Source") == "service_principal" {
-		return "service_principal", r.Header.Get("X-Service-Principal-ID")
-	}
 	if r.Header.Get("X-Actor-Source") == "task_token" {
 		// Server-set header — auth middleware also forced X-Agent-ID
 		// from the token row. Trust it directly without re-querying.
