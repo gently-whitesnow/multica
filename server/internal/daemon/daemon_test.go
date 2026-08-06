@@ -1557,6 +1557,78 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 	return d
 }
 
+type targetSyncRecordingRepoCache struct {
+	targetURL string
+	synced    []repocache.RepoInfo
+}
+
+func (c *targetSyncRecordingRepoCache) Lookup(_, url string) string {
+	for _, repo := range c.synced {
+		if repo.URL == url {
+			return "/cached"
+		}
+	}
+	return ""
+}
+
+func (c *targetSyncRecordingRepoCache) BarePath(_, _ string) string {
+	return ""
+}
+
+func (c *targetSyncRecordingRepoCache) Sync(_ string, repos []repocache.RepoInfo) error {
+	c.synced = append([]repocache.RepoInfo(nil), repos...)
+	for _, repo := range repos {
+		if repo.URL != c.targetURL {
+			return fmt.Errorf("unreachable unrelated repository: %s", repo.URL)
+		}
+	}
+	return nil
+}
+
+func (c *targetSyncRecordingRepoCache) WithRepoLock(_ string, fn func() error) error {
+	return fn()
+}
+
+func (c *targetSyncRecordingRepoCache) CreateWorktree(repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return nil, nil
+}
+
+func TestEnsureRepoReadySyncsOnlyRequestedRepo(t *testing.T) {
+	t.Parallel()
+
+	const (
+		targetRepo    = "https://github.com/example/target"
+		unrelatedRepo = "https://gitlab.invalid/example/unreachable"
+	)
+	cache := &targetSyncRecordingRepoCache{targetURL: targetRepo}
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID: "ws-1",
+			Repos: []RepoData{
+				{URL: unrelatedRepo},
+				{URL: targetRepo},
+			},
+			ReposVersion: "v2",
+		})
+	})
+	d.repoCache = cache
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{
+		{URL: unrelatedRepo},
+		{URL: targetRepo},
+	}, nil)
+
+	if err := d.ensureRepoReady(context.Background(), "ws-1", targetRepo); err != nil {
+		t.Fatalf("ensureRepoReady: %v", err)
+	}
+
+	if len(cache.synced) != 1 || cache.synced[0].URL != targetRepo {
+		t.Fatalf("synced repos = %+v, want only target %q", cache.synced, targetRepo)
+	}
+	if got := d.workspaceLastRepoSyncErr("ws-1"); got != "" {
+		t.Fatalf("target sync inherited unrelated repo error: %q", got)
+	}
+}
+
 func TestGateCodexResumeToRolloutPresence(t *testing.T) {
 	t.Parallel()
 

@@ -2334,7 +2334,7 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return nil
 	}
 
-	resp, err := d.refreshWorkspaceRepos(ctx, workspaceID)
+	_, err := d.refreshWorkspaceRepos(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("refresh workspace repos: %w", err)
 	}
@@ -2347,7 +2347,10 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return nil
 	}
 
-	d.syncWorkspaceRepos(workspaceID, resp.Repos)
+	// A direct checkout must not depend on unrelated workspace repositories.
+	// The background workspace sync remains responsible for refreshing the
+	// complete registry and reporting failures for its individual resources.
+	d.syncWorkspaceRepos(workspaceID, []RepoData{{URL: repoURL}})
 
 	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
 		return nil
