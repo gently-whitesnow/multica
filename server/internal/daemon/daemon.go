@@ -2107,13 +2107,23 @@ func (d *Daemon) waitBackgroundSyncs() {
 	d.bgSyncs.Wait()
 }
 
+func (d *Daemon) syncRepos(workspaceID string, repos []RepoData) error {
+	if d.repoCache == nil {
+		return nil
+	}
+	if err := d.repoCache.Sync(workspaceID, repoDataToInfo(repos)); err != nil {
+		d.logger.Warn("repo cache sync failed", "workspace_id", workspaceID, "error", err)
+		return err
+	}
+	return nil
+}
+
 func (d *Daemon) syncWorkspaceRepos(workspaceID string, repos []RepoData) {
 	if d.repoCache == nil {
 		return
 	}
-	if err := d.repoCache.Sync(workspaceID, repoDataToInfo(repos)); err != nil {
+	if err := d.syncRepos(workspaceID, repos); err != nil {
 		d.setWorkspaceRepoSyncError(workspaceID, err.Error())
-		d.logger.Warn("repo cache sync failed", "workspace_id", workspaceID, "error", err)
 		return
 	}
 	d.setWorkspaceRepoSyncError(workspaceID, "")
@@ -2350,13 +2360,13 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	// A direct checkout must not depend on unrelated workspace repositories.
 	// The background workspace sync remains responsible for refreshing the
 	// complete registry and reporting failures for its individual resources.
-	d.syncWorkspaceRepos(workspaceID, []RepoData{{URL: repoURL}})
+	syncErr := d.syncRepos(workspaceID, []RepoData{{URL: repoURL}})
 
 	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
 		return nil
 	}
 
-	if syncErr := d.workspaceLastRepoSyncErr(workspaceID); syncErr != "" {
+	if syncErr != nil {
 		return fmt.Errorf("repo is configured but not synced: %s", syncErr)
 	}
 

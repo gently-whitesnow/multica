@@ -1562,6 +1562,35 @@ type targetSyncRecordingRepoCache struct {
 	synced    []repocache.RepoInfo
 }
 
+type crossTalkRepoCache struct {
+	onLookup func()
+	synced   bool
+}
+
+func (c *crossTalkRepoCache) Lookup(_, _ string) string {
+	if c.synced && c.onLookup != nil {
+		c.onLookup()
+	}
+	return ""
+}
+
+func (c *crossTalkRepoCache) BarePath(_, _ string) string {
+	return ""
+}
+
+func (c *crossTalkRepoCache) Sync(_ string, _ []repocache.RepoInfo) error {
+	c.synced = true
+	return errors.New("git clone --bare: authentication failed for https://github.com/example/target")
+}
+
+func (c *crossTalkRepoCache) WithRepoLock(_ string, fn func() error) error {
+	return fn()
+}
+
+func (c *crossTalkRepoCache) CreateWorktree(repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return nil, nil
+}
+
 func (c *targetSyncRecordingRepoCache) Lookup(_, url string) string {
 	for _, repo := range c.synced {
 		if repo.URL == url {
@@ -1616,6 +1645,7 @@ func TestEnsureRepoReadySyncsOnlyRequestedRepo(t *testing.T) {
 		{URL: unrelatedRepo},
 		{URL: targetRepo},
 	}, nil)
+	d.setWorkspaceRepoSyncError("ws-1", "Could not resolve host: gitlab.invalid")
 
 	if err := d.ensureRepoReady(context.Background(), "ws-1", targetRepo); err != nil {
 		t.Fatalf("ensureRepoReady: %v", err)
@@ -1624,8 +1654,50 @@ func TestEnsureRepoReadySyncsOnlyRequestedRepo(t *testing.T) {
 	if len(cache.synced) != 1 || cache.synced[0].URL != targetRepo {
 		t.Fatalf("synced repos = %+v, want only target %q", cache.synced, targetRepo)
 	}
-	if got := d.workspaceLastRepoSyncErr("ws-1"); got != "" {
-		t.Fatalf("target sync inherited unrelated repo error: %q", got)
+	if got := d.workspaceLastRepoSyncErr("ws-1"); got != "Could not resolve host: gitlab.invalid" {
+		t.Fatalf("target sync changed background repo error: %q", got)
+	}
+}
+
+func TestEnsureRepoReadyKeepsTargetSyncErrorLocal(t *testing.T) {
+	t.Parallel()
+
+	const (
+		targetRepo    = "https://github.com/example/target"
+		unrelatedRepo = "https://gitlab.invalid/example/unreachable"
+	)
+	cache := &crossTalkRepoCache{}
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID: "ws-1",
+			Repos: []RepoData{
+				{URL: unrelatedRepo},
+				{URL: targetRepo},
+			},
+			ReposVersion: "v2",
+		})
+	})
+	d.repoCache = cache
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{
+		{URL: unrelatedRepo},
+		{URL: targetRepo},
+	}, nil)
+
+	// Model a background full sync landing between the target sync and its
+	// post-sync lookup. It must not replace the target checkout's own error.
+	cache.onLookup = func() {
+		d.setWorkspaceRepoSyncError("ws-1", "Could not resolve host: gitlab.invalid")
+	}
+
+	err := d.ensureRepoReady(context.Background(), "ws-1", targetRepo)
+	if err == nil {
+		t.Fatal("expected checkout failure")
+	}
+	if strings.Contains(err.Error(), "gitlab.invalid") {
+		t.Fatalf("target checkout reported an unrelated repository error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "authentication failed") {
+		t.Fatalf("target checkout error = %v, want target authentication failure", err)
 	}
 }
 
@@ -3527,8 +3599,11 @@ func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "repo is configured but not synced:") {
 		t.Fatalf("expected sync failure error, got %v", err)
 	}
-	if got := d.workspaceLastRepoSyncErr("ws-1"); got == "" {
-		t.Fatal("expected lastRepoSyncErr to be recorded")
+	if !strings.Contains(err.Error(), missingRepo) {
+		t.Fatalf("sync failure did not identify target repo: %v", err)
+	}
+	if got := d.workspaceLastRepoSyncErr("ws-1"); got != "" {
+		t.Fatalf("target sync leaked into background repo error: %q", got)
 	}
 }
 
