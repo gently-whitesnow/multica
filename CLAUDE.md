@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+> **Read first:** Before any repository work, read and follow the fork contract
+> in **[FORK.md](FORK.md)**. It takes precedence for fork-specific changes.
+
 Guidance for Claude Code when working in this repository. Keep this file short and authoritative: rules here should be hard to infer from code or easy to get wrong.
 
 ## Conventions
